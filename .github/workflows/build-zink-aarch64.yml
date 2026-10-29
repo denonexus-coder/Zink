@@ -1,0 +1,91 @@
+name: Build Zink/OSMesa ARM64 (Pojav renderer)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+env:
+  # Versao do Mesa fixada: casa com o mesa-zink.diff do PojavLauncherTeam.
+  # Troque aqui se quiser outra tag (ex.: mesa-24.0.9). master pode nao casar
+  # com o diff e os hunks caem em .rej.
+  MESA_REF: "mesa-23.3.6"
+
+jobs:
+  build-aarch64:
+    name: OSMesa + Zink (aarch64 / ARMv8.0-A)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (crossfile + patch helper)
+        uses: actions/checkout@v4
+
+      - name: Dependencias de build (host)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            meson ninja-build ccache gettext-base pkg-config python3-pip \
+            libdrm-dev bison flex
+          pip3 install --user mako pyyaml
+
+      - name: Localizar o Android NDK
+        run: |
+          # O runner ja traz um NDK; usamos o do ANDROID_NDK_LATEST_HOME.
+          echo "ANDROID_NDK_ROOT=${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}" >> "$GITHUB_ENV"
+          echo "NDK em: ${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
+          ls "${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin" | grep aarch64-linux-android24-clang
+
+      - name: Gerar cross-file (resolve \$ANDROID_NDK_ROOT)
+        run: |
+          envsubst < build-crossfile.in > build-crossfile
+          echo "----- build-crossfile -----"
+          cat build-crossfile
+
+      - name: Clonar Mesa + aplicar patch real do Pojav
+        run: |
+          git clone --depth 1 --branch "$MESA_REF" \
+            https://gitlab.freedesktop.org/mesa/mesa.git mesa
+          # Patch REAL do PojavLauncherTeam/osmesa-zink-builder (repo arquivado).
+          curl -fsSL -o mesa-zink.diff \
+            https://raw.githubusercontent.com/PojavLauncherTeam/osmesa-zink-builder/master/mesa-zink.diff
+          cd mesa
+          git apply --reject --whitespace=fix ../mesa-zink.diff || \
+            echo "AVISO: alguns hunks nao aplicaram (ver *.rej) — verifique a MESA_REF"
+
+      - name: meson setup (opcoes do Pojav: OSMesa + Zink, sem LLVM)
+        working-directory: mesa
+        run: |
+          meson setup build-android \
+            --prefix=/tmp/zink \
+            --cross-file ../build-crossfile \
+            -Dplatforms=android \
+            -Dplatform-sdk-version=25 \
+            -Dandroid-stub=true \
+            -Dllvm=disabled \
+            -Dxlib-lease=disabled \
+            -Degl=disabled \
+            -Dgbm=disabled \
+            -Dglx=disabled \
+            -Dopengl=true \
+            -Dosmesa=true \
+            -Dvulkan-drivers= \
+            -Dgallium-drivers=zink \
+            -Dshared-glapi=false \
+            -Dandroid-libbacktrace=disabled \
+            -Dbuildtype=release
+
+      - name: Compilar + instalar
+        working-directory: mesa
+        run: ninja -C build-android install
+
+      - name: Inspecionar binario
+        run: |
+          find /tmp/zink -name '*.so' -print
+          SO=$(find /tmp/zink -name 'libOSMesa*.so' | head -1)
+          "${ANDROID_NDK_ROOT}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" -h "$SO" | grep -E 'Machine|Class'
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libzink_aarch64
+          path: /tmp/zink
+          if-no-files-found: error
