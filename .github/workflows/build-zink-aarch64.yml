@@ -51,7 +51,7 @@ jobs:
           git apply --reject --whitespace=fix ../mesa-zink.diff || \
             echo "AVISO: alguns hunks nao aplicaram (ver *.rej) — verifique a MESA_REF"
 
-      - name: meson setup (opcoes do Pojav: OSMesa + Zink, sem LLVM)
+      - name: "meson setup (opcoes do Pojav: OSMesa + Zink, sem LLVM)"
         working-directory: mesa
         run: |
           meson setup build-android \
