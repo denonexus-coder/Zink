@@ -79,8 +79,9 @@ jobs:
 
       - name: Inspecionar binario
         run: |
-          find /tmp/zink -name '*.so' -print
-          SO=$(find /tmp/zink -name 'libOSMesa*.so' | head -1)
+          find /tmp/zink -name 'libOSMesa*' -print
+          SO=$(find /tmp/zink \( -name 'libOSMesa.so*' -o -name 'libOSMesa*.so.*' \) | head -1)
+          [ -n "$SO" ] || { echo "ERRO: libOSMesa nao encontrada em /tmp/zink"; exit 1; }
           "${ANDROID_NDK_ROOT}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" -h "$SO" | grep -E 'Machine|Class'
 
       - name: Upload artifact
